@@ -2,6 +2,7 @@
 
 ### Year : 2023
 
+
 ![000022](https://github.com/sarveshsn/Indoor-Scene-Classification/assets/93898181/fc658f7f-0270-4304-94f1-477a05eb6722)
 
 
