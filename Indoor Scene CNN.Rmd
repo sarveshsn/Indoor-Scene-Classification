@@ -1,0 +1,534 @@
+---
+title: "Indoor Scene Classification"
+author: "Sarvesh Naik"
+date: "`r Sys.Date()`"
+output: word_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+Loading the dataset. 
+
+```{r}
+
+#We load and display some of the pictures in the training set.
+library("jpeg") # to load pictures
+
+# just selecting some images
+set <- matrix(c("b1", "b2", "b3", "b4",
+"bed8", "bed170", "bed109", "bed213"), 4, 2)
+
+# plot
+par(mfrow = c(2,4), mar = rep(0.5, 4))
+for ( i in 1:4 ) {
+path <- "data_indoor/train/bathroom/"
+img <- readJPEG(paste0(path, set[i,1], ".jpg"), native = TRUE)
+plot(0:1, 0:1, type = "n", ann = FALSE, axes = FALSE)
+rasterImage(img, 0, 0, 1, 1)
+}
+for ( i in 1:4 ) {
+path <- "data_indoor/train/bedroom/"
+img <- readJPEG(paste0(path, set[i,2], ".jpg"), native = TRUE)
+plot(0:1, 0:1, type = "n", ann = FALSE, axes = FALSE)
+rasterImage(img, 0, 0, 1, 1)
+}
+
+```
+Here some of the images of the bathroom and bedroom from train dataset are shown. Similarly the train, test and validation datasets have images of other indoor house components such as children_room, closet,
+corridor, dining_room, garage, kitchen, living_room, stairs. In total there are 10 categories of the target variable.  
+
+
+MODEL 1
+
+We now deploy our model. We specify a CNN with 4 convolution layers, interleaved by 4 max-pooling layers and then
+followed by 2 fully connected layers. The first convolution layer is set with 32 filters and a 3 × 3 kernel with strides 1 (default). The following 3 convolution layers are set with 64 and 128 filters with 3 × 3 kernels. All max-pooling layers have a pool size of 2 × 2, thus halving width and height at every pass. The fully connected layer uses 512 units and ReLU activation function. Note that no regularization is included.
+
+```{r}
+
+library(keras)
+
+#define the CNN model
+model1 <- keras_model_sequential() %>%
+
+#Convolutional layers
+layer_conv_2d(filters = 32, kernel_size = c(3, 3), activation = "relu",
+input_shape = c(64, 64, 3)) %>%
+layer_max_pooling_2d(pool_size = c(2, 2)) %>%
+layer_conv_2d(filters = 64, kernel_size = c(3, 3), activation = "relu") %>%
+layer_max_pooling_2d(pool_size = c(2, 2)) %>%
+layer_conv_2d(filters = 128, kernel_size = c(3, 3), activation = "relu") %>%
+layer_max_pooling_2d(pool_size = c(2, 2)) %>%
+layer_conv_2d(filters = 128, kernel_size = c(3, 3), activation = "relu") %>%
+layer_max_pooling_2d(pool_size = c(2, 2)) %>%
+#
+# fully connected layers
+layer_flatten() %>%
+layer_dense(units = 512, activation = "relu") %>%
+layer_dense(units = 10, activation = "softmax") %>%
+#
+# compile
+compile(
+loss = "categorical_crossentropy",
+metrics = "accuracy",
+optimizer = optimizer_rmsprop(learning_rate = 0.0001)
+)
+
+# Save the weights to an HDF5 file
+save_model_hdf5(model1, "model1.h5")
+
+```
+
+
+
+```{r}
+
+train_dir <- "data_indoor/train"
+validation_dir <- "data_indoor/validation"
+test_dir <- "data_indoor/test"
+
+train_datagen <- image_data_generator(rescale = 1/255)
+validation_datagen <- image_data_generator(rescale = 1/255)
+test_datagen <- image_data_generator(rescale= 1/255)
+
+train_generator <- flow_images_from_directory(
+train_dir,
+train_datagen,
+target_size = c(64, 64),
+batch_size = 60,
+class_mode = "categorical",
+shuffle=TRUE
+)
+
+
+validation_generator <- flow_images_from_directory(
+validation_dir,
+validation_datagen,
+target_size = c(64, 64),
+batch_size = 60,
+class_mode = "categorical"
+)
+
+test_generator <- flow_images_from_directory(
+test_dir,
+test_datagen,
+target_size = c(64, 64),
+batch_size = 60,
+class_mode = "categorical",
+shuffle=FALSE
+)
+
+
+```
+
+
+```{r}
+# Fit the model
+fit1 <- model1 %>% fit(
+  train_generator,
+  steps_per_epoch = as.integer(1713/60),
+  epochs = 50,
+  validation_data = validation_generator,
+  validation_steps = as.integer(851/60)
+)
+
+```
+
+```{r}
+
+# plot the learning curves
+library(ggplot2)
+
+# plot accuracy and loss
+library(grDevices)
+
+# to add a smooth line to points
+smooth_line <- function(y) {
+  x <- 1:length(y)
+  out1 <- predict( loess(y ~ x) )
+  return(out)
+}
+
+# check learning curves
+out1 <- cbind(fit1$metrics$accuracy,
+            fit1$metrics$val_accuracy,
+            fit1$metrics$loss,
+            fit1$metrics$val_loss)
+cols <- c("black", "dodgerblue3")
+par(mfrow = c(1,2))
+# accuracy
+matplot(out1[,1:2], pch = 19, ylab = "Accuracy", xlab = "Epochs",
+        col = adjustcolor(cols, 0.3),
+        log = "y")
+matlines(apply(out1[,1:2], 2, smooth_line), lty = 1, col = cols, lwd = 2)
+legend("bottomright", legend = c("Training", "Validation"),
+       fill = cols, bty = "n")
+
+# loss
+matplot(out1[,3:4], pch = 19, ylab = "Loss", xlab = "Epochs",
+        col = adjustcolor(cols, 0.3))
+matlines(apply(out1[,3:4], 2, smooth_line), lty = 1, col = cols, lwd = 2)
+legend("topright", legend = c("Training", "Validation"),
+       fill = cols, bty = "n")
+```
+```{r}
+
+# Evaluate the model on the test set
+scores <- model1 %>% evaluate_generator(test_generator, steps = test_generator$n)
+
+# Print the test set accuracy
+cat("Test set accuracy:", scores[2], "\n")
+
+
+```
+
+
+Increase the number of filters in convolutional layers:
+        You can try increasing the number of filters in your convolutional layers, which can help the model learn more complex features. For example, instead of starting with 32 filters, you can try starting with 64 or 128 filters.
+
+Use dropout regularization:
+        Dropout regularization can help prevent overfitting by randomly dropping out (i.e., setting to zero) some of the neurons during training. You can add a dropout layer after each convolutional layer or after each dense layer. For example, you can try adding a dropout layer with a rate of 0.25 after each max pooling layer.
+
+Use batch normalization:
+        Batch normalization can help improve the stability and speed of training by normalizing the inputs to each layer. You can add a batch normalization layer after each convolutional layer or dense layer. For example, you can try adding a batch normalization layer after each activation layer.
+
+Vary the kernel size:
+        The size of the kernel (i.e., filter) can also affect the model's ability to learn features at different scales. You can try using different kernel sizes in your convolutional layers, such as 5x5 or 7x7 instead of 3x3.
+    
+```{r}
+
+# define the CNN model
+model2 <- keras_model_sequential() %>%
+
+  # convolutional layers
+  layer_conv_2d(filters = 64, kernel_size = c(5, 5), activation = "relu", input_shape = c(64, 64, 3)) %>%
+  layer_batch_normalization() %>%
+  layer_max_pooling_2d(pool_size = c(2, 2)) %>%
+  layer_dropout(rate = 0.25) %>%
+
+  layer_conv_2d(filters = 128, kernel_size = c(5, 5), activation = "relu") %>%
+  layer_batch_normalization() %>%
+  layer_max_pooling_2d(pool_size = c(2, 2)) %>%
+  layer_dropout(rate = 0.25) %>%
+
+  layer_conv_2d(filters = 256, kernel_size = c(3, 3), activation = "relu") %>%
+  layer_batch_normalization() %>%
+  layer_max_pooling_2d(pool_size = c(2, 2)) %>%
+  layer_dropout(rate = 0.25) %>%
+
+  layer_conv_2d(filters = 512, kernel_size = c(3, 3), activation = "relu") %>%
+  layer_batch_normalization() %>%
+  layer_max_pooling_2d(pool_size = c(2, 2)) %>%
+  layer_dropout(rate = 0.25) %>%
+
+  # fully connected layers
+  layer_flatten() %>%
+  layer_dense(units = 512, activation = "relu") %>%
+  layer_batch_normalization() %>%
+  layer_dropout(rate = 0.5) %>%
+  
+  layer_dense(units = 10, activation = "softmax") %>%
+
+  # compile
+  compile(
+    loss = "categorical_crossentropy",
+    metrics = "accuracy",
+    optimizer = optimizer_adam(learning_rate = 0.001)
+  )
+
+
+```
+
+In this example, we have increased the number of filters in the convolutional layers, added batch normalization after each activation layer, and added dropout after each max pooling layer and dense layer. We have also varied the kernel size in the convolutional layers. We are using the Adam optimizer instead of RMSprop.
+
+```{r}
+
+# Fit the model
+fit2 <- model2 %>% fit(
+  train_generator,
+  steps_per_epoch = as.integer(1713/60),
+  epochs = 50,
+  validation_data = validation_generator,
+  validation_steps = as.integer(851/60)
+)
+
+```
+
+```{r}
+
+# plot the learning curves
+library(ggplot2)
+
+# plot accuracy and loss
+library(grDevices)
+
+# to add a smooth line to points
+smooth_line <- function(y) {
+  x <- 1:length(y)
+  out <- predict( loess(y ~ x) )
+  return(out)
+}
+
+# check learning curves
+out2 <- cbind(fit2$metrics$accuracy,
+            fit2$metrics$val_accuracy,
+            fit2$metrics$loss,
+            fit2$metrics$val_loss)
+cols <- c("black", "dodgerblue3")
+par(mfrow = c(1,2))
+# accuracy
+matplot(out2[,1:2], pch = 19, ylab = "Accuracy", xlab = "Epochs",
+        col = adjustcolor(cols, 0.3),
+        log = "y")
+matlines(apply(out2[,1:2], 2, smooth_line), lty = 1, col = cols, lwd = 2)
+legend("bottomright", legend = c("Training", "Validation"),
+       fill = cols, bty = "n")
+
+# loss
+matplot(out2[,3:4], pch = 19, ylab = "Loss", xlab = "Epochs",
+        col = adjustcolor(cols, 0.3))
+matlines(apply(out2[,3:4], 2, smooth_line), lty = 1, col = cols, lwd = 2)
+legend("topright", legend = c("Training", "Validation"),
+       fill = cols, bty = "n")
+```
+
+```{r}
+
+# Evaluate the model on the test set
+scores <- model2 %>% evaluate_generator(test_generator, steps = test_generator$n)
+
+# Print the test set accuracy
+cat("Test set accuracy:", scores[2], "\n")
+
+
+```
+
+Data augmentation
+
+The data considered here have a relatively small number of training samples (1713). Because of this, the model is
+likely to overfit, since there are too few samples to learn from and hence it won’t be able to generalize well to new data.
+o solve the problem, we use data augmentation, a specific computer vision technique widely used when processing
+images with deep learning models.
+The idea behind data augmentation is the following. Given a theoretically infinite amount of data, the model would
+be exposed to every possible aspect of the data generating process, hence it would never overfit and will always be
+able to generalize well. Data augmentation generates additional training data from the available training samples, by
+augmenting the samples using a number of random transformations that provide realistic-looking images. The aim is
+that at training time, the model will never encounter the exact same image twice. This helps expose the model to
+more aspects of the data generating process and generalize better, thus introducing regularization.
+
+```{r}
+
+# set our data augmentation generator
+data_augment <- image_data_generator(
+rescale = 1/255,
+rotation_range = 40,
+width_shift_range = 0.2,
+height_shift_range = 0.2,
+shear_range = 0.2,
+zoom_range = 0.2,
+horizontal_flip = TRUE,
+fill_mode = "nearest"
+)
+
+# plot a couple of examples
+par(mfrow = c(2, 4), mar = rep(0.5, 4))
+
+img_array <- image_to_array(
+image_load("data_indoor/train/bathroom/b1.jpg", target_size = c(64, 64))
+)
+img_array <- array_reshape(img_array, c(1, 64, 64, 3))
+augmentation_generator <- flow_images_from_data(
+img_array,
+generator = data_augment,
+batch_size = 1
+)
+for (i in 1:4) {
+batch <- generator_next(augmentation_generator)
+
+plot(as.raster(batch[1,,,]))
+}
+
+img_array <- image_to_array(
+image_load("data_indoor/train/bedroom/bed109.jpg" ,target_size = c(64, 64))
+)
+img_array <- array_reshape(img_array, c(1, 64, 64, 3))
+augmentation_generator <- flow_images_from_data(
+img_array,
+generator = data_augment,
+batch_size = 1
+)
+for (i in 1:4) {
+batch <- generator_next(augmentation_generator)
+plot(as.raster(batch[1,,,]))
+}
+
+
+```
+
+```{r}
+
+library(keras)
+
+#define the CNN model
+model3 <- keras_model_sequential() %>%
+
+#Convolutional layers
+layer_conv_2d(filters = 32, kernel_size = c(3, 3), activation = "relu",
+input_shape = c(64, 64, 3)) %>%
+layer_max_pooling_2d(pool_size = c(2, 2)) %>%
+layer_conv_2d(filters = 64, kernel_size = c(3, 3), activation = "relu") %>%
+layer_max_pooling_2d(pool_size = c(2, 2)) %>%
+layer_conv_2d(filters = 128, kernel_size = c(3, 3), activation = "relu") %>%
+layer_max_pooling_2d(pool_size = c(2, 2)) %>%
+layer_conv_2d(filters = 128, kernel_size = c(3, 3), activation = "relu") %>%
+layer_max_pooling_2d(pool_size = c(2, 2)) %>%
+#
+# fully connected layers
+layer_flatten() %>%
+layer_dense(units = 512, activation = "relu") %>%
+layer_dense(units = 10, activation = "softmax") %>%
+#
+# compile
+compile(
+loss = "categorical_crossentropy",
+metrics = "accuracy",
+optimizer = optimizer_rmsprop(learning_rate = 0.0001)
+)
+
+# train data generator with data augmentation
+train_generator_aug <- flow_images_from_directory(
+train_dir,
+data_augment,
+target_size = c(64, 64),
+batch_size = 60,
+class_mode = "categorical"
+)
+
+validation_generator <- flow_images_from_directory(
+validation_dir,
+validation_datagen,
+target_size = c(64, 64),
+batch_size = 60,
+class_mode = "categorical"
+)
+
+test_generator <- flow_images_from_directory(
+test_dir,
+test_datagen,
+target_size = c(64, 64),
+batch_size = 60,
+class_mode = "categorical",
+shuffle=FALSE
+)
+
+```
+
+```{r}
+# Fit the model
+fit3 <- model3 %>% fit(
+  train_generator_aug,
+  steps_per_epoch = as.integer(1713/60),
+  epochs = 50,
+  validation_data = validation_generator,
+  validation_steps = as.integer(851/60)
+)
+
+```
+
+```{r}
+
+
+# check accuracy learning curve
+out3 <- cbind(out1[,1:2],
+fit3$metrics$accuracy,
+fit3$metrics$val_accuracy,
+out1[,3:4],
+fit3$metrics$loss,
+fit3$metrics$val_loss)
+cols <- c("black", "dodgerblue3", "darkorchid4", "magenta")
+par(mfrow = c(1,2))
+#
+# accuracy
+matplot(out3[,1:4],
+pch = 19, ylab = "Accuracy", xlab = "Epochs",
+col = adjustcolor(cols, 0.3),
+log = "y")
+matlines(apply(out3[,1:4], 2, smooth_line), lty = 1, col = cols, lwd = 2)
+legend("bottomright", legend = c("Training", "Valid", "Aug_Training", "Aug_Valid"),
+fill = cols, bty = "n")
+#
+# loss
+matplot(out3[,5:8], pch = 19, ylab = "Loss", xlab = "Epochs",
+col = adjustcolor(cols, 0.3))
+matlines(apply(out3[,5:8], 2, smooth_line), lty = 1, col = cols, lwd = 2)
+legend("topright", legend = c("Training", "Valid", "Aug_Training", "Aug_Valid"),
+fill = cols, bty = "n")
+
+
+
+```
+
+```{r}
+
+# Evaluate the model on the test set
+scores <- model1 %>% evaluate_generator(test_generator, steps = test_generator$n)
+
+# Print the test set accuracy
+cat("Test set accuracy:", scores[2], "\n")
+
+
+
+```
+
+```{r}
+library(keras)
+
+# Load the saved weights for the best model
+model1 <- load_model_hdf5("model1.h5")
+
+test_steps <- as.integer(ceiling(test_generator$n / 60))
+test_preds <- predict(model1, test_generator, steps = test_steps, verbose = 1)
+
+
+# Convert predicted probabilities to class labels
+test_preds_class <- max.col(test_preds) - 1
+
+# Get the actual labels for the test set
+test_labels <- test_generator$classes
+
+# Create a confusion matrix
+conf_mat <- table(test_labels, test_preds_class)
+
+
+# Print out the confusion matrix
+print(conf_mat)
+
+print(class(conf_mat))
+str(conf_mat)
+
+```
+
+```{r}
+
+conf_mat <- table(test_labels, test_preds_class)
+
+# Calculate precision, recall, and F1 score for each class
+precision <- diag(conf_mat) / colSums(conf_mat)
+recall <- diag(conf_mat) / rowSums(conf_mat)
+F1_score <- 2 * (precision * recall) / (precision + recall)
+
+# Print results
+for (i in 1:nrow(conf_mat)) {
+  cat("Class", i-1, "Precision:", round(precision[i], 3), "\tRecall:", round(recall[i], 3), "\tF1 score:", round(F1_score[i], 3), "\n")
+}
+
+# Calculate macro-averaged precision, recall, and F1 score
+macro_precision <- mean(precision)
+macro_recall <- mean(recall)
+macro_F1_score <- mean(F1_score)
+
+cat("\nMacro-averaged Precision:", round(macro_precision, 3), "\tMacro-averaged Recall:", round(macro_recall, 3), "\tMacro-averaged F1 score:", round(macro_F1_score, 3), "\n")
+
+
+```
