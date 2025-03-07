@@ -78,7 +78,11 @@ To execute this project, follow these steps:
 
 After training your models, evaluate them on the test set and calculate various metrics, including accuracy, precision, recall, and F1 score, to assess model performance.
 
-## Author 
+## License
+This project is open-source and available under the [MIT License](LICENSE).
 
-- **Sarvesh Sairam Naik**
+---
+
+**Author:** Sarvesh Sairam Naik  
+**GitHub Repository:** [GitHub Link](https://github.com/sarveshsn)
 
